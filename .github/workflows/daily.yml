@@ -1,0 +1,85 @@
+name: 매일 카드뉴스 발행
+
+on:
+  schedule:
+    # UTC 기준. 한국시간 = UTC + 9  ->  아래는 매일 KST 오전 8시
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "카드만 만들고 발행은 건너뛰기"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BRAND_HANDLE: ${{ vars.BRAND_HANDLE }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      GITHUB_BRANCH: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 의존성 설치
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-cjk-extra
+          fc-cache -f
+
+      - name: 카드 렌더링
+        id: render
+        run: |
+          set +e
+          python cardnews.py --stage render
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ $code -eq 78 ]; then exit 0; fi
+          exit $code
+
+      - name: 뱅크 소진 알림
+        if: steps.render.outputs.code == '78'
+        run: echo "::warning::콘텐츠 뱅크가 비었습니다. content/bank.json 을 채워주세요."
+
+      - name: 이미지 커밋
+        if: steps.render.outputs.code == '0'
+        run: |
+          git config user.name  "cardnews-bot"
+          git config user.email "actions@github.com"
+          git add published/
+          git diff --cached --quiet || git commit -m "카드 생성 $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: 인스타그램 발행
+        if: steps.render.outputs.code == '0' && inputs.dry_run != true
+        run: python cardnews.py --stage publish
+
+      - name: 발행 기록 커밋
+        if: steps.render.outputs.code == '0' && inputs.dry_run != true
+        run: |
+          git add content/state.json
+          git diff --cached --quiet || git commit -m "발행 기록 $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: 실패 시 카드 남기기
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cards-debug
+          path: published/
+          retention-days: 7
