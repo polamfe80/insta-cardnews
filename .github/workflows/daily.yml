@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      BRAND_HANDLE: ${{ vars.BRAND_HANDLE }}
+      BRAND_HANDLE: "3분 재테크"
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       IG_USER_ID: ${{ secrets.IG_USER_ID }}
       IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
